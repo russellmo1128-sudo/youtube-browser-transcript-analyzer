@@ -12,6 +12,22 @@ V0.1 is a browser-first workflow for collecting evidence from YouTube videos:
 
 The project does not include conversion scoring or business-specific templates. It only produces reliable source artifacts that downstream analysis can use.
 
+## Easiest Windows Usage
+
+For non-technical teammates:
+
+1. Download this repo as a ZIP from GitHub.
+2. Unzip it.
+3. Double-click `START_HERE.bat` once.
+4. Open the unzipped folder in Codex.
+5. Ask Codex:
+
+```text
+帮我总结这个 YouTube 视频：https://www.youtube.com/watch?v=VIDEO_ID
+```
+
+See [Non-technical quickstart](docs/NON_TECHNICAL_QUICKSTART.md).
+
 ## Codex One-sentence Usage
 
 This repository includes `AGENTS.md` so Codex can use the local CLI when a teammate asks for a YouTube summary.

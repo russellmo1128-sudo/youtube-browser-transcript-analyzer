@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 from .artifacts import write_json
@@ -66,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     common.add_argument("--connect-timeout-ms", type=int, default=30000)
     common.add_argument("--settle-ms", type=int, default=2500)
     common.add_argument("--ensure-browser", action="store_true")
+    common.add_argument(
+        "--restart-on-connect-failure",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Restart the fixed CDP browser once if Playwright cannot connect.",
+    )
 
     capture = subparsers.add_parser("capture", parents=[common])
     capture.add_argument("url")
@@ -97,7 +105,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             )
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.connect_over_cdp(args.cdp_endpoint)
+        try:
+            browser = playwright.chromium.connect_over_cdp(
+                args.cdp_endpoint,
+                timeout=args.connect_timeout_ms,
+            )
+        except (PlaywrightTimeoutError, PlaywrightError):
+            if not (args.ensure_browser and args.restart_on_connect_failure):
+                raise
+            version_payload = ensure_browser(
+                args.cdp_endpoint,
+                args.launcher,
+                args.connect_timeout_ms,
+                force_new=True,
+            )
+            browser = playwright.chromium.connect_over_cdp(
+                args.cdp_endpoint,
+                timeout=args.connect_timeout_ms,
+            )
         runs = [
             capture_single(
                 browser=browser,

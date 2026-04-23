@@ -62,7 +62,21 @@ Windows Edge example:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_edge_cdp.ps1
 ```
 
-By default this starts Edge on `http://127.0.0.1:9222` with a local `.browser-profile/edge-cdp` profile.
+By default this starts Edge on `http://127.0.0.1:9222` with a persistent user-local profile.
+
+The browser profile is persistent across runs and stored under:
+
+```text
+%LOCALAPPDATA%\youtube-browser-transcript-analyzer\edge-cdp-profile
+```
+
+If a CDP browser is already running on port `9222`, the script reuses it instead of opening another debug browser. Later video captures open new tabs in the same browser.
+
+If the old debug browser becomes stale, the CLI restarts it once automatically by default. You can also force a restart manually:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_edge_cdp.ps1 -ForceNew
+```
 
 ## Capture One Video
 
@@ -81,6 +95,8 @@ If the console cannot find `yt-browser-analyzer`, use the module form:
 ```powershell
 yt-browser-analyzer batch-capture "https://www.youtube.com/watch?v=AAA" "https://youtu.be/BBB" --ensure-browser
 ```
+
+Use `batch-capture` when the user provides multiple links. It keeps one browser connection and opens one new tab per video.
 
 ## Output Artifacts
 

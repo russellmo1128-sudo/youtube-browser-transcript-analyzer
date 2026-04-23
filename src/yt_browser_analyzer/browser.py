@@ -35,16 +35,16 @@ def wait_for_cdp(endpoint: str, timeout_ms: int) -> dict | None:
     return None
 
 
-def ensure_browser(endpoint: str, launcher: str, timeout_ms: int) -> dict:
+def ensure_browser(endpoint: str, launcher: str, timeout_ms: int, force_new: bool = False) -> dict:
     payload = cdp_json_version(endpoint)
-    if payload:
+    if payload and not force_new:
         return payload
     if not launcher:
         raise BrowserError(f"CDP endpoint {endpoint} is not ready and no launcher was provided.")
-    subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher],
-        check=True,
-    )
+    command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher]
+    if force_new:
+        command.append("-ForceNew")
+    subprocess.run(command, check=True)
     payload = wait_for_cdp(endpoint, timeout_ms)
     if not payload:
         raise BrowserError(f"Browser did not become ready at {endpoint} within {timeout_ms} ms.")

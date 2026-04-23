@@ -6,6 +6,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start_edge_cdp
 
 echo.
 echo Fixed Edge CDP browser has been started.
+echo If one was already running, it was reused.
 echo Keep that browser open while Codex analyzes YouTube videos.
 echo.
 pause

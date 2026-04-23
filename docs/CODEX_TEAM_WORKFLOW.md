@@ -37,6 +37,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_edge_cdp.ps1
 
 Keep that browser open while running captures.
 
+The fixed browser uses a persistent local profile:
+
+```text
+%LOCALAPPDATA%\youtube-browser-transcript-analyzer\edge-cdp-profile
+```
+
+After the first setup, later captures reuse the same browser/profile. If the browser is already running on port `9222`, the launcher will not open another debug browser.
+
+If an old debug browser is stale, the CLI restarts it once automatically. Manual fallback:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_edge_cdp.ps1 -ForceNew
+```
+
 ## One-sentence Codex Usage
 
 Ask Codex from inside this repository:
@@ -55,6 +69,14 @@ Short version:
 ```
 
 The repository-level `AGENTS.md` tells Codex how to handle this request.
+
+For multiple links in one message, Codex should use one batch command:
+
+```powershell
+.\.venv\Scripts\python.exe -m yt_browser_analyzer.cli batch-capture "URL1" "URL2" "URL3" --ensure-browser
+```
+
+This reuses the same fixed browser and opens new tabs for each video.
 
 ## Single Video Capture
 

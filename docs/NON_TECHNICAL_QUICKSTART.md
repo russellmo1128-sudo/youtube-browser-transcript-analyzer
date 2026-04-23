@@ -22,6 +22,10 @@ START_HERE.bat
 
 This creates the local Python environment and installs the browser automation dependency.
 
+The tool uses one persistent Edge browser environment on your computer. After the first run, later videos reuse the same browser and open new tabs.
+
+If the browser gets stuck, close the debug Edge window and run `OPEN_BROWSER.bat` again. The CLI also tries one automatic restart when the CDP connection is stale.
+
 ## Use With Codex
 
 1. Open Codex.
@@ -33,6 +37,8 @@ This creates the local Python environment and installs the browser automation de
 ```
 
 Codex should read `AGENTS.md`, run the local capture tool, then summarize from the generated evidence files.
+
+If you send multiple YouTube links in one message, Codex should process them in one batch and reuse the same browser.
 
 ## If Codex Does Not Automatically Run The Tool
 

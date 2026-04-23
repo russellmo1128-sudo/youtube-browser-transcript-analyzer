@@ -5,8 +5,8 @@ This repository is a local YouTube video evidence collector and timestamped anal
 When the user asks to summarize, analyze, or extract information from a YouTube URL:
 
 1. Use this repository's CLI instead of web search.
-2. Start or reuse the fixed Edge CDP browser.
-3. Run the capture command for the provided YouTube URL.
+2. Start or reuse the fixed Edge CDP browser. Do not manually start a separate debug browser if port `9222` is already available. The CLI can restart the fixed debug browser automatically if the existing CDP connection is stale.
+3. Run the capture command for the provided YouTube URL. If the user provides multiple YouTube URLs in one message, use `batch-capture` once instead of running multiple separate `capture` commands.
 4. Read the latest generated run directory under `outputs/youtube-browser-transcript/<video_id>/`.
 5. Check `run.json` before summarizing.
 6. Only summarize when:
@@ -32,6 +32,14 @@ Default command:
 
 ```powershell
 .\.venv\Scripts\python.exe -m yt_browser_analyzer.cli capture "<YOUTUBE_URL>" --ensure-browser
+```
+
+The CLI defaults to `--restart-on-connect-failure`, so a stale debug browser should be restarted once automatically.
+
+Multiple URLs:
+
+```powershell
+.\.venv\Scripts\python.exe -m yt_browser_analyzer.cli batch-capture "<YOUTUBE_URL_1>" "<YOUTUBE_URL_2>" --ensure-browser
 ```
 
 If `.venv` does not exist, run:

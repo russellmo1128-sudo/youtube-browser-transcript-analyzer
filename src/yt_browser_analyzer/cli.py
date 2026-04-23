@@ -149,7 +149,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     try:
         payload = run(parse_args())
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json.dumps(payload, ensure_ascii=True, indent=2))
         return 0
     except KeyboardInterrupt:
         return 130

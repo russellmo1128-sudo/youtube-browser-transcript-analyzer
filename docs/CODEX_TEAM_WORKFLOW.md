@@ -7,35 +7,28 @@ This guide is for teammates using Codex with their own GPT Plus accounts.
 After setup, a teammate should be able to ask Codex:
 
 ```text
-帮我总结这个 YouTube 视频：https://www.youtube.com/watch?v=VIDEO_ID
+Summarize this YouTube video: https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
 Codex should then run this repo's CLI, control the fixed browser through Playwright/CDP, capture transcript artifacts, read the local output files, and summarize the video.
 
 ## One-time Setup
 
-Clone the repository:
+Recommended:
 
 ```powershell
-git clone https://github.com/YOUR_NAME/youtube-browser-transcript-analyzer.git
-cd youtube-browser-transcript-analyzer
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup_windows.ps1
 ```
 
-Create the Python environment:
+Manual equivalent:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe -m ensurepip --upgrade --default-pip
+.\.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements.txt
+$site = .\.venv\Scripts\python.exe -c "import site; print(site.getsitepackages()[0])"
+Set-Content -LiteralPath (Join-Path $site "yt_browser_analyzer_local.pth") -Value (Join-Path (Get-Location) "src") -Encoding ASCII
 ```
-
-Start the fixed Edge browser:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_edge_cdp.ps1
-```
-
-Keep that browser open while running captures.
 
 The fixed browser uses a persistent local profile:
 
@@ -56,16 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_edge_cdp.ps1
 Ask Codex from inside this repository:
 
 ```text
-帮我总结这个 YouTube 视频：https://www.youtube.com/watch?v=VIDEO_ID
-
-请使用本仓库的 yt_browser_analyzer CLI 抓取字幕和公开视频指标。
-运行完成后读取最新 outputs 目录，先检查 run.json 是否 ready，再基于 transcript.browser.blocks.json、video_public_metrics.json 和 content_analysis.md 按时间戳总结。
-```
-
-Short version:
-
-```text
-帮我总结这个视频：https://www.youtube.com/watch?v=VIDEO_ID
+Summarize this YouTube video: https://www.youtube.com/watch?v=VIDEO_ID
 ```
 
 The repository-level `AGENTS.md` tells Codex how to handle this request.
@@ -165,6 +149,13 @@ Create a comparison table with:
 
 ## Troubleshooting
 
+If setup fails:
+
+- copy the exact setup error into Codex
+- make sure Python 3.10+ is installed
+- make sure the computer can access Python package downloads
+- if Codex reports `PermissionError`, `WinError 5`, or Python temp directory access errors, approve rerunning the same command outside the sandbox
+
 If capture is blocked:
 
 - confirm the fixed Edge browser is still open
@@ -173,9 +164,9 @@ If capture is blocked:
 - check `run.json` and `transcript_debug`
 - do not summarize a blocked transcript as final
 
-If Playwright cannot launch or connect:
+If Playwright cannot connect:
 
-- run `.\.venv\Scripts\python.exe -m playwright install chromium`
+- if Codex reports `WinError 5` while starting Playwright, approve rerunning the same capture command outside the sandbox
 - make sure port `9222` is not occupied by another browser profile
 - restart the Edge CDP browser using `scripts/start_edge_cdp.ps1`
 

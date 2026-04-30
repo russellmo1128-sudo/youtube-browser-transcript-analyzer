@@ -4,9 +4,9 @@ V0.1 is a browser-first workflow for collecting evidence from YouTube videos:
 
 - connect to a fixed local Microsoft Edge CDP browser
 - open a user-provided YouTube watch URL
-- capture transcript rows from the live YouTube page
-- fall back to the page-exposed signed caption track URL when available
-- validate video ID, non-empty transcript rows, and monotonic timestamps
+- capture the player-triggered CC `/api/timedtext?fmt=json3` response when available
+- fall back to the live transcript panel and then the page-exposed signed caption track URL
+- validate video ID, non-empty transcript rows, monotonic timestamps, and transcript coverage
 - collect public page metrics such as views, comments, likes, channel name, subscriber text, duration, and publish date when visible
 - write timestamped transcript artifacts and a content analysis report
 
@@ -132,6 +132,8 @@ A capture is usable only when:
 - requested video ID equals the page video ID
 - cleaned transcript entries are non-empty
 - cleaned transcript timestamps are monotonic
+- player-triggered timedtext responses match the requested video ID
+- transcript coverage is sufficient for full-video analysis when duration is known
 - the transcript source is recorded
 
 If those checks fail, the run is marked `blocked`. Do not treat blocked output as a final summary.

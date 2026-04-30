@@ -14,11 +14,13 @@ from .transcript import (
     build_cleaned_entries,
     build_raw_entries,
     build_transcript_text,
+    capture_cc_timedtext_rows,
     extract_transcript_rows,
     fetch_timedtext_rows,
     invoke_transcript_commands,
     scroll_transcript_until_stable,
     selected_track,
+    validate_coverage,
     validate_cleaned_entries,
     wait_for_transcript_rows,
 )
@@ -42,6 +44,11 @@ def _build_run_manifest(
         "pipeline": {
             "mode": "browser_transcript",
             "source": "fixed_cdp_browser",
+            "fallbacks": [
+                "CC-triggered timedtext json3",
+                "live transcript command path",
+                "page-exposed signed caption track URL",
+            ],
         },
         "artifacts": {
             "metadata": "metadata.json",
@@ -82,15 +89,26 @@ def capture_single(
     write_json(run_dir / "metadata.json", metadata)
 
     track = selected_track(page_payload)
-    invoke_result = invoke_transcript_commands(
-        page,
-        page_payload.get("showEndpoint"),
-        page_payload.get("continuationEndpoint"),
-    )
-    initial_rows = wait_for_transcript_rows(page)
-    final_rows = scroll_transcript_until_stable(page) if initial_rows else 0
-    transcript_source = "youtube_live_transcript_browser"
-    rows = extract_transcript_rows(page)
+    cc_timedtext_result = capture_cc_timedtext_rows(page, requested_video_id)
+    invoke_result: dict[str, Any] = {
+        "skipped": cc_timedtext_result.get("status") == "ready",
+        "reason": "CC-triggered timedtext json3 returned usable caption rows.",
+    }
+    initial_rows = 0
+    final_rows = 0
+    if cc_timedtext_result.get("status") == "ready":
+        transcript_source = "youtube_cc_timedtext_json3"
+        rows = list(cc_timedtext_result.get("rows") or [])
+    else:
+        invoke_result = invoke_transcript_commands(
+            page,
+            page_payload.get("showEndpoint"),
+            page_payload.get("continuationEndpoint"),
+        )
+        initial_rows = wait_for_transcript_rows(page)
+        final_rows = scroll_transcript_until_stable(page) if initial_rows else 0
+        transcript_source = "youtube_live_transcript_browser"
+        rows = extract_transcript_rows(page)
     if not rows and track and track.base_url:
         rows = fetch_timedtext_rows(page, track.base_url)
         transcript_source = "youtube_timedtext_caption_track_fallback"
@@ -98,8 +116,14 @@ def capture_single(
     cleaned_entries = build_cleaned_entries(raw_entries)
     blocks = build_blocks(cleaned_entries)
     cleaned_validation = validate_cleaned_entries(cleaned_entries)
+    coverage_validation = validate_coverage(cleaned_entries, metadata.get("duration_seconds"))
     video_id_match = requested_video_id == video_id
-    usable = bool(cleaned_entries) and cleaned_validation["monotonic_timestamps"] and video_id_match
+    usable = (
+        bool(cleaned_entries)
+        and cleaned_validation["monotonic_timestamps"]
+        and coverage_validation["sufficient_for_full_video_summary"]
+        and video_id_match
+    )
     status = "ready" if usable else "blocked"
 
     notes = []
@@ -107,19 +131,24 @@ def capture_single(
         notes.append(f"Selected transcript track: {track.language_code} ({track.kind or 'unknown'}).")
     else:
         notes.append("No caption track metadata was exposed in the player response.")
-    notes.append(
-        "Transcript rows were loaded through the live browser transcript command path."
-        if cleaned_entries and transcript_source == "youtube_live_transcript_browser"
-        else "Transcript rows were loaded through the page-exposed signed caption track URL."
-        if cleaned_entries
-        else "Transcript command path did not produce readable rows."
-    )
+    if cleaned_entries and transcript_source == "youtube_cc_timedtext_json3":
+        notes.append("Transcript rows were loaded from the player CC-triggered timedtext json3 response.")
+    elif cleaned_entries and transcript_source == "youtube_live_transcript_browser":
+        notes.append("Transcript rows were loaded through the live browser transcript command path.")
+    elif cleaned_entries:
+        notes.append("Transcript rows were loaded through the page-exposed signed caption track URL.")
+    else:
+        notes.append("Transcript command path did not produce readable rows.")
     if not video_id_match:
         notes.append(f"Requested video_id {requested_video_id} but page exposed {video_id}.")
     if cleaned_entries and not cleaned_validation["monotonic_timestamps"]:
         notes.append("Transcript timestamps are not monotonic after cleaning.")
     if invoke_result.get("errors"):
         notes.extend(str(item) for item in invoke_result["errors"])
+    if cc_timedtext_result.get("errors"):
+        notes.extend(f"CC timedtext: {item}" for item in cc_timedtext_result["errors"])
+    if cleaned_entries and not coverage_validation["sufficient_for_full_video_summary"]:
+        notes.append("Transcript coverage is too short for a full-video summary.")
 
     validation = {
         "requested_video_id": requested_video_id,
@@ -131,6 +160,12 @@ def capture_single(
         "cleaned_entry_count": len(cleaned_entries),
         "block_count": len(blocks),
         "cleaned_entries": cleaned_validation,
+        "coverage": coverage_validation,
+        "cc_timedtext": {
+            key: value
+            for key, value in cc_timedtext_result.items()
+            if key != "rows"
+        },
         "usable_for_summary": usable,
     }
 
@@ -149,6 +184,11 @@ def capture_single(
         **transcript_common,
         "source": transcript_source,
         "command_invocation": invoke_result,
+        "cc_timedtext_capture": {
+            key: value
+            for key, value in cc_timedtext_result.items()
+            if key != "rows"
+        },
         "row_count": len(raw_entries),
         "entries": raw_entries,
     }
@@ -207,5 +247,10 @@ def capture_single(
             "initial_row_count": initial_rows,
             "final_row_count": final_rows,
             "invoke_result": invoke_result,
+            "cc_timedtext_result": {
+                key: value
+                for key, value in cc_timedtext_result.items()
+                if key != "rows"
+            },
         },
     }

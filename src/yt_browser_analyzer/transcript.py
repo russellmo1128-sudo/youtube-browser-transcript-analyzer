@@ -5,14 +5,15 @@ import json
 from html import unescape
 from dataclasses import dataclass
 from typing import Any, Iterable
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 from xml.etree import ElementTree
 
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from .timeutil import format_timestamp, parse_timestamp
 
 TRANSCRIPT_ROW_SELECTOR = "ytd-transcript-segment-renderer"
+TIMEDTEXT_PATH = "/api/timedtext"
 
 
 @dataclass
@@ -270,6 +271,182 @@ def build_blocks(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_transcript_text(entries: Iterable[dict[str, Any]]) -> str:
     lines = [f"[{item['start_ts']}] {item['text']}" for item in entries]
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def is_timedtext_json3_url(url: str, expected_video_id: str | None = None) -> bool:
+    parsed = urlparse(url)
+    if parsed.path != TIMEDTEXT_PATH:
+        return False
+    query = parse_qs(parsed.query)
+    if (query.get("fmt") or [""])[0] != "json3":
+        return False
+    if expected_video_id and (query.get("v") or [""])[0] != expected_video_id:
+        return False
+    return True
+
+
+def summarize_timedtext_url(url: str) -> dict[str, Any]:
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    return {
+        "path": parsed.path,
+        "fmt": (query.get("fmt") or [""])[0] or None,
+        "video_id": (query.get("v") or [""])[0] or None,
+        "language": (query.get("lang") or [""])[0] or None,
+        "kind": (query.get("kind") or [""])[0] or None,
+        "variant": (query.get("variant") or [""])[0] or None,
+        "has_pot": bool((query.get("pot") or [""])[0]),
+        "has_signature": bool((query.get("signature") or [""])[0]),
+    }
+
+
+def wait_for_player_not_ad(page: Page, timeout_ms: int = 15000) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "ad_seen": False,
+        "ad_cleared": False,
+        "skip_clicked": False,
+        "errors": [],
+    }
+    deadline = time.time() + timeout_ms / 1000
+    while time.time() < deadline:
+        try:
+            is_ad = bool(
+                page.evaluate(
+                    "() => document.querySelector('#movie_player')?.classList.contains('ad-showing') || false"
+                )
+            )
+        except Exception as error:
+            result["errors"].append(f"ad state check failed: {error}")
+            break
+        if not is_ad:
+            result["ad_cleared"] = True
+            return result
+        result["ad_seen"] = True
+        try:
+            skip_button = page.locator(
+                ".ytp-ad-skip-button, .ytp-skip-ad-button, button.ytp-ad-skip-button-modern"
+            ).first
+            if skip_button.count() and skip_button.is_visible():
+                skip_button.click(timeout=2000)
+                result["skip_clicked"] = True
+        except Exception:
+            pass
+        page.wait_for_timeout(1000)
+    return result
+
+
+def capture_cc_timedtext_rows(
+    page: Page,
+    expected_video_id: str,
+    timeout_ms: int = 20000,
+) -> dict[str, Any]:
+    """Capture the player-generated timedtext JSON after enabling CC.
+
+    The player request can include runtime parameters such as `pot` that are not present in
+    `captionTracks.baseUrl`. Only responses whose `v` parameter matches the requested video
+    are accepted, so ad captions or other player media cannot satisfy the capture.
+    """
+
+    result: dict[str, Any] = {
+        "status": "not_attempted",
+        "trigger": "cc_button",
+        "expected_video_id": expected_video_id,
+        "cc_button_found": False,
+        "cc_state_before": None,
+        "cc_state_after": None,
+        "ad_wait": None,
+        "http_status": None,
+        "content_type": None,
+        "body_length": 0,
+        "entry_count": 0,
+        "url_summary": None,
+        "url_video_id_match": None,
+        "errors": [],
+        "rows": [],
+    }
+
+    try:
+        page.locator("#movie_player").first.hover(timeout=5000)
+    except Exception as error:
+        result["errors"].append(f"movie player hover failed: {error}")
+    result["ad_wait"] = wait_for_player_not_ad(page)
+
+    cc_button = page.locator(
+        'button.ytp-subtitles-button, button[data-tooltip-target-id="ytp-subtitles-button"], button[aria-keyshortcuts="c"]'
+    ).first
+    try:
+        cc_button.wait_for(state="attached", timeout=7000)
+        result["cc_button_found"] = True
+    except PlaywrightTimeoutError:
+        result["status"] = "blocked"
+        result["errors"].append("CC button was not found in the YouTube player controls.")
+        return result
+
+    def read_cc_state() -> dict[str, str | None]:
+        return cc_button.evaluate(
+            """
+            el => ({
+              ariaPressed: el.getAttribute('aria-pressed'),
+              tooltip: el.getAttribute('data-tooltip-title'),
+              title: el.getAttribute('title'),
+              classes: el.className ? String(el.className) : ''
+            })
+            """
+        )
+
+    try:
+        result["cc_state_before"] = read_cc_state()
+        if result["cc_state_before"].get("ariaPressed") == "true":
+            cc_button.click(timeout=10000)
+            page.wait_for_timeout(500)
+        with page.expect_response(
+            lambda response: is_timedtext_json3_url(response.url, expected_video_id),
+            timeout=timeout_ms,
+        ) as response_info:
+            cc_button.click(timeout=10000)
+        response = response_info.value
+        result["cc_state_after"] = read_cc_state()
+        result["http_status"] = response.status
+        result["content_type"] = response.headers.get("content-type", "")
+        result["url_summary"] = summarize_timedtext_url(response.url)
+        result["url_video_id_match"] = result["url_summary"].get("video_id") == expected_video_id
+        body = response.text()
+        result["body_length"] = len(body)
+        if not body.strip():
+            result["status"] = "blocked"
+            result["errors"].append("CC-triggered timedtext response body was empty.")
+            return result
+        rows = _parse_json3_rows(body)
+        result["rows"] = rows
+        result["entry_count"] = len(rows)
+        result["status"] = "ready" if rows else "blocked"
+        if not rows:
+            result["errors"].append("CC-triggered timedtext JSON contained no readable caption events.")
+        return result
+    except PlaywrightTimeoutError:
+        result["status"] = "blocked"
+        result["cc_state_after"] = read_cc_state() if result["cc_button_found"] else None
+        result["errors"].append("Timedtext json3 response was not observed after toggling CC.")
+        return result
+    except Exception as error:
+        result["status"] = "blocked"
+        result["errors"].append(f"CC-triggered timedtext capture failed: {error}")
+        return result
+
+
+def validate_coverage(entries: list[dict[str, Any]], duration_seconds: float | int | None) -> dict[str, Any]:
+    last_start = float(entries[-1]["start_sec"]) if entries else None
+    ratio = None
+    sufficient = bool(entries)
+    if duration_seconds and duration_seconds > 0 and last_start is not None:
+        ratio = last_start / float(duration_seconds)
+        sufficient = duration_seconds < 120 or ratio >= 0.8
+    return {
+        "duration_seconds": duration_seconds,
+        "last_start_sec": last_start,
+        "last_start_ratio": round(ratio, 4) if ratio is not None else None,
+        "sufficient_for_full_video_summary": sufficient,
+    }
 
 
 def _with_query_param(url: str, key: str, value: str) -> str:
